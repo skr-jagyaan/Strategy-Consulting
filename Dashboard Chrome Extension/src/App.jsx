@@ -8,7 +8,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // --- SIMULATION DATA (Updated for Martin Logic) ---
+  // --- SIMULATION DATA ---
   const simulationData = {
     week3: {
       companyName: "Acme Corp",
@@ -62,17 +62,39 @@ export default function App() {
       if (!response.ok) throw new Error("Network response was not ok");
       
       const csvText = await response.text();
-      const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
-      if (lines.length <= 1) throw new Error("The CSV file is empty or missing data.");
+      // Split by newline, keeping empty rows temporarily to maintain line indexes
+      const allLines = csvText.split(/\r?\n/);
+      
+      if (allLines.length < 4) throw new Error("The CSV file does not match the Elite Tracking format.");
 
-      const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').trim());
-      const rows = lines.slice(1).map(line => {
-        // Simple CSV parse handling potential commas in quotes (rudimentary fallback)
+      // 1. Extract Global Variables (Row 1 / Index 0 in CSV)
+      // We look at the second column (Index 1) for the Company Name
+      const row1Values = allLines[0].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+      let compName = "Unknown Client";
+      if (row1Values.length > 1 && row1Values[1]) {
+        compName = row1Values[1].replace(/^"|"$/g, '').trim();
+        if (compName === "[ Type Company Name Here ]" || compName === "") {
+          compName = "Unnamed Client";
+        }
+      }
+
+      // 2. Extract Headers (Row 3 / Index 2 in CSV)
+      const headers = allLines[2].split(',').map(h => h.replace(/^"|"$/g, '').trim());
+
+      // 3. Extract Data Rows (Row 4 and beyond)
+      // Filter out any completely empty rows (where all commas are empty)
+      const dataLines = allLines.slice(3).filter(line => line.replace(/,/g, '').trim() !== '');
+      
+      if (dataLines.length === 0) throw new Error("No data rows found in the sheet.");
+
+      const rows = dataLines.map(line => {
         const values = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.replace(/^"|"$/g, '').trim());
         return headers.reduce((obj, header, i) => ({ ...obj, [header]: values[i] }), {});
       });
 
       const latest = rows[rows.length - 1];
+      
+      // Calculate history based on ProposalsWon / ProposalsSent
       const history = rows.slice(-4).map(r => {
         const s = Number(r.ProposalsSent) || 0;
         const w = Number(r.ProposalsWon) || 0;
@@ -81,6 +103,9 @@ export default function App() {
 
       // Pad history to ensure chart renders 4 points
       while (history.length < 4) history.unshift(history[0] || 0);
+
+      // Start Date is now the Meeting_Date or Week of the very first recorded data row
+      const sDate = rows[0].Meeting_Date || rows[0].Week || "TBD";
 
       const wr = (Number(latest.ProposalsSent) > 0) ? Math.round((Number(latest.ProposalsWon) / Number(latest.ProposalsSent)) * 100) : 0;
       const f = Number(latest.Focus) || 0;
@@ -113,8 +138,8 @@ export default function App() {
       }
 
       setLiveData({
-        companyName: latest.CompanyName || rows[0].CompanyName || "Unknown Client",
-        startDate: latest.StartDate || rows[0].StartDate || "TBD",
+        companyName: compName,
+        startDate: sDate,
         wwhtbt: latest.Core_WWHTBT_Tested || "No active assumption logged.",
         limits: latest.Target_Control_Limits || "No control limits set.",
         variance: v,
@@ -130,7 +155,8 @@ export default function App() {
       });
       setLoading(false);
     } catch (err) {
-      setError("Sync failed. Ensure CSV URL is correct and Google Sheet matches required headers.");
+      console.error(err);
+      setError(`Sync failed: ${err.message}. Ensure CSV is published and layout matches the Elite format.`);
       setLoading(false);
     }
   };
@@ -145,9 +171,10 @@ export default function App() {
   const dotY = 50 - offset * Math.sin(Math.PI / 4); 
 
   // Format Date Safely
-  const formattedDate = current.startDate !== "TBD" 
-    ? new Date(current.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-    : current.startDate;
+  let formattedDate = current.startDate;
+  if (formattedDate !== "TBD" && !isNaN(Date.parse(formattedDate))) {
+      formattedDate = new Date(formattedDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900">
