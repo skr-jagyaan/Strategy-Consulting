@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Optional: Sets a clean default background for the whole extension */
+body {
+  background-color: #f8fafc; /* slate-50 */
+  margin: 0;
+}
